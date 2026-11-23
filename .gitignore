@@ -1,0 +1,14 @@
+
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.pem
+*.key
+*.tfvars
+*.tfvars.json
+.env
+.ansible/
+vault-password*
+crash.log
+Thumbs.db

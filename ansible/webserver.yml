@@ -1,0 +1,33 @@
+---
+- name: Configure TravelMemory web server
+  hosts: web
+  become: yes
+
+  tasks:
+    - name: Update apt packages
+      apt:
+        update_cache: yes
+
+    - name: Install required packages
+      apt:
+        name:
+          - git
+          - curl
+          - nginx
+          - nodejs
+          - npm
+        state: present
+
+    - name: Enable and start Nginx
+      service:
+        name: nginx
+        state: started
+        enabled: yes
+
+    - name: Create application directory
+      file:
+        path: /opt/travelmemory
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0755'
