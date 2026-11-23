@@ -1,7 +1,13 @@
+
 ---
-- name: Configure TravelMemory web server
+- name: Deploy TravelMemory application
   hosts: web
   become: yes
+
+  vars:
+    app_dir: /opt/travelmemory
+    repo_url: https://github.com/UnpredictablePrashant/TravelMemory.git
+    database_ip: "{{ hostvars[groups['database'][0]]['ansible_host'] }}"
 
   tasks:
     - name: Update apt packages
@@ -16,18 +22,126 @@
           - nginx
           - nodejs
           - npm
+          - build-essential
         state: present
 
-    - name: Enable and start Nginx
+    - name: Clone TravelMemory application
+      git:
+        repo: "{{ repo_url }}"
+        dest: "{{ app_dir }}"
+        version: main
+
+    - name: Install backend dependencies
+      npm:
+        path: "{{ app_dir }}/backend"
+        state: present
+
+    - name: Configure backend environment
+      copy:
+        dest: "{{ app_dir }}/backend/.env"
+        content: |
+          NODE_ENV=production
+          PORT=3001
+          MONGO_URI=mongodb://{{ database_ip }}:27017/travelmemory
+          CORS_ORIGIN=http://{{ ansible_host }}
+          UPLOAD_DIR=uploads
+          MAX_UPLOAD_MB=5
+          TRUST_PROXY=1
+
+    - name: Create backend uploads directory
+      file:
+        path: "{{ app_dir }}/backend/uploads"
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0755'
+
+    - name: Create backend systemd service
+      copy:
+        dest: /etc/systemd/system/travelmemory.service
+        content: |
+          [Unit]
+          Description=TravelMemory Backend
+          After=network.target
+
+          [Service]
+          Type=simple
+          User=ubuntu
+          WorkingDirectory={{ app_dir }}/backend
+          ExecStart=/usr/bin/node index.js
+          Restart=always
+          Environment=NODE_ENV=production
+
+          [Install]
+          WantedBy=multi-user.target
+      notify: Restart TravelMemory
+
+    - name: Configure frontend backend URL
+      copy:
+        dest: "{{ app_dir }}/frontend/.env"
+        content: |
+          REACT_APP_BACKEND_URL=http://{{ ansible_host }}
+
+    - name: Install frontend dependencies
+      npm:
+        path: "{{ app_dir }}/frontend"
+        state: present
+
+    - name: Build React frontend
+      command: npm run build
+      args:
+        chdir: "{{ app_dir }}/frontend"
+
+    - name: Copy frontend build to Nginx
+      copy:
+        src: "{{ app_dir }}/frontend/build/"
+        dest: /var/www/html/
+        remote_src: yes
+      notify: Restart Nginx
+
+    - name: Configure Nginx
+      copy:
+        dest: /etc/nginx/sites-available/default
+        content: |
+          server {
+              listen 80 default_server;
+              root /var/www/html;
+              index index.html;
+
+              location / {
+                  try_files $uri $uri/ /index.html;
+              }
+
+              location ~ ^/(trip|uploads|hello|health) {
+                  proxy_pass http://127.0.0.1:3001;
+                  proxy_http_version 1.1;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+              }
+          }
+      notify: Restart Nginx
+
+    - name: Start and enable TravelMemory backend
+      systemd:
+        name: travelmemory
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+    - name: Start and enable Nginx
       service:
         name: nginx
         state: started
         enabled: yes
 
-    - name: Create application directory
-      file:
-        path: /opt/travelmemory
-        state: directory
-        owner: ubuntu
-        group: ubuntu
-        mode: '0755'
+  handlers:
+    - name: Restart TravelMemory
+      systemd:
+        name: travelmemory
+        state: restarted
+        daemon_reload: yes
+
+    - name: Restart Nginx
+      service:
+        name: nginx
+        state: restarted

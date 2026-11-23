@@ -25,6 +25,10 @@ resource "aws_key_pair" "travelmemory" {
   tags = {
     Name = "${var.project_name}-key"
   }
+
+  lifecycle {
+    ignore_changes = [public_key]
+  }
 }
 
 resource "aws_instance" "web" {
